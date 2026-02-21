@@ -63,7 +63,6 @@ Person& Person::operator=(const Person& other)
     return *this;
 }
 
-// NEW: Move Constructor
 Person::Person(Person&& other) noexcept
     : _name(other._name), _age(other._age), _id(other._id)
 {
@@ -72,6 +71,29 @@ Person::Person(Person&& other) noexcept
     other._age = 0;
     other._id = 0;
 }
+// NEW: Move assignment operator
+Person& Person::operator=(Person&& other) noexcept
+{
+    if (this == &other) {
+        return *this;
+    }
+
+    // Free current resource
+    delete[] _name;
+
+    // Transfer ownership
+    _name = other._name;
+    _age  = other._age;
+    _id   = other._id;
+
+    // Leave other in a safe state
+    other._name = nullptr;
+    other._age  = 0;
+    other._id   = 0;
+
+    return *this;
+}
+
 
 void Person::SetName(const char* name)
 {

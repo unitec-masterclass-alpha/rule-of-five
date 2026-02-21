@@ -8,14 +8,13 @@ private:
 
 public:
     Person(const char* name, int age, int id);
-
-    // Rule of 3
     ~Person();
+
     Person(const Person& other);
     Person& operator=(const Person& other);
 
-    // NEW: Move Constructor (Rule of 5 begins)
     Person(Person&& other) noexcept;
+    Person& operator=(Person&& other) noexcept;   // NEW
 
     void SetName(const char* name);
 

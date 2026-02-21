@@ -1174,9 +1174,199 @@ This confirms:
 ### Move Copy Assignment Operator
 
 #### Goal
+
+Implement the **Move Assignment Operator** to complete the Rule of 5 and allow efficient reassignment from _rvalue_ objects.
+
+This step teaches:
+
+- Move construction handles initialization from rvalues.
+- Move assignment handles reassignment from rvalues.
+- We must properly:
+  - Free existing resources.
+  - Transfer ownership.
+  - Leave the moved-from object in a safe state.
+- Even though self-assignment with rvalues is rare, it must still be safe.
+
+> Key idea: Move assignment transfers ownership safely during reassignment.
+<details>
+<summary>What are lvalues and rvalues</summary>
+* An lvalue is something that has a persistent location in memory.
+* An rvalue is a temporary value that does not persist beyond the expression that uses it.
+Example:
+```cpp
+Person a("Igor", 25, 1011), b("Art", 67, 1021);
+a = b;
+```
+In the code above, a is an lvalue and b is an rvalue. l stands for _left side of an assignment_ and r stands fo _right side of an assignment_.
+</details>
+---
+
 #### State of Code
-#### Code
-#### Expected Results
+
+At the start of this step, `Person` already has:
+
+- Constructor
+- Destructor
+- Copy constructor
+- Copy assignment operator
+- Move constructor
+
+What is missing:
+
+- `Person& operator=(Person&& other) noexcept`
+
+Without move assignment:
+
+- `p = std::move(q);` may fall back to copy assignment (deep copy).
+- The class is not yet fully compliant with the Rule of 5.
+
+After this step:
+
+- Reassigning from an rvalue transfers ownership instead of copying.
+- No double frees.
+- No leaks.
+- Efficient ownership transfer.
+
+---
+
+### Code
+
+`include/person.h`
+
+```cpp
+#pragma once
+
+class Person {
+private:
+    char* _name;
+    int _age;
+    int _id;
+
+public:
+    Person(const char* name, int age, int id);
+    ~Person();
+
+    Person(const Person& other);
+    Person& operator=(const Person& other);
+
+    Person(Person&& other) noexcept;
+    Person& operator=(Person&& other) noexcept;   // NEW
+
+    void SetName(const char* name);
+
+    const char* GetName() const;
+    int GetAge() const;
+    int GetId() const;
+};
+```
+
+---
+
+`src/person.cpp`
+
+```cpp
+Person& Person::operator=(Person&& other) noexcept
+{
+    if (this == &other) {
+        return *this;
+    }
+
+    // Free current resource
+    delete[] _name;
+
+    // Transfer ownership
+    _name = other._name;
+    _age  = other._age;
+    _id   = other._id;
+
+    // Leave other in a safe state
+    other._name = nullptr;
+    other._age  = 0;
+    other._id   = 0;
+
+    return *this;
+}
+```
+
+---
+
+`src/main.cpp`
+
+```cpp
+#include "person.h"
+#include <iostream>
+#include <utility>
+
+static void PrintPerson(const char* label, const Person& p)
+{
+    std::cout << label
+              << " Name=" << (p.GetName() ? p.GetName() : "(null)")
+              << " Age=" << p.GetAge()
+              << " ID=" << p.GetId()
+              << " name_ptr=" << static_cast<const void*>(p.GetName())
+              << "\n";
+}
+
+int main()
+{
+    Person a("Alice", 30, 1);
+    Person b("Bob", 40, 2);
+
+    PrintPerson("Before move-assign, a:", a);
+    PrintPerson("Before move-assign, b:", b);
+
+    a = std::move(b);   // Move assignment
+
+    PrintPerson("After move-assign, a:", a);
+    PrintPerson("After move-assign, b:", b);
+
+    return 0;
+}
+```
+
+---
+
+### Expected Results
+
+- `make run`
+
+  - Program runs normally.
+  - After `a = std::move(b);`:
+    - `a.name_ptr` should be the pointer that originally belonged to `b`.
+    - `b.GetName()` should be `nullptr` (printed as `(null)`).
+  - No crash should occur when either object is destroyed.
+
+---
+
+- `make run-asan`
+
+  - ASan should report:
+    - No double-free
+    - No use-after-free
+    - No invalid frees
+  - If the move assignment is incorrect (for example, forgetting to null out `other._name`), ASan will typically report:
+    - `ERROR: AddressSanitizer: attempting double-free`
+    - pointing to `Person::~Person()`.
+
+---
+
+- `make valgrind`
+
+  - Valgrind should report:
+    - `ERROR SUMMARY: 0 errors from 0 contexts`
+    - No memory leaks
+    - No invalid frees
+
+---
+
+This confirms:
+
+- Move assignment successfully transfers ownership.
+- The previous resource is properly freed.
+- The moved-from object remains safe and destructible.
+- The class now fully satisfies the Rule of 5.
+
+
 
 :pushpin: `TAG step-01-05-move-assign`
 
