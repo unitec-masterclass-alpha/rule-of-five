@@ -23,21 +23,6 @@ Person::~Person()
     _name = nullptr;
 }
 
-// Copy Constructor (deep copy)
-Person::Person(const Person& other)
-    : _name(nullptr), _age(other._age), _id(other._id)
-{
-    if (!other._name) {
-        _name = new char[1];
-        _name[0] = '\0';
-        return;
-    }
-
-    std::size_t len = std::strlen(other._name);
-    _name = new char[len + 1];
-    std::strcpy(_name, other._name);
-}
-
 void Person::SetName(const char* name)
 {
     delete[] _name;

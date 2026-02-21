@@ -38,7 +38,7 @@ project-root/
 The following sequence of commands executed at the command line with the repo's directory achieves this structure:
 ```bash
 mkdir -p .devcontainer include src
-touch makefile include/buffer.h src/main.cpp src/buffer.cpp 
+touch makefile include/person.h src/main.cpp src/person.cpp 
 touch .devcontainer/Dockerfile .devcontainer/devcontainer.json
 ```
 
@@ -574,13 +574,341 @@ vscode ➜ /workspaces/rule-of-five (main) $
 
 :pushpin: `TAG step-01-02-copy-assg-op`
 
-### Copy Assignment Operator
+
+### Copy Constructor
 
 #### Goal
-#### State of Code
-#### Code
-#### Expected Results
 
+Create a **Copy Constructor disaster** by relying on the **compiler-generated copy constructor** (which performs a shallow copy of `_name`).
+
+This step demonstrates:
+
+- The compiler will automatically generate a copy constructor if you don’t write one.
+- That default copy constructor copies **the pointer value**, not the heap data.
+- After copying, **two `Person` objects point to the same `_name` buffer**.
+- When the objects are destroyed, both destructors attempt to `delete[]` the same pointer → **double free**.
+- ASan and Valgrind will reveal the bug and point to the exact lines.
+
+> Key idea: If your class owns dynamic memory, the compiler-generated copy constructor is almost always wrong.
+
+---
+
+#### State of Code
+
+- `Person` owns `_name` (allocated with `new[]`) and stores `_age`, `_id`.
+- `Person` has a **constructor** that allocates/copies `_name`.
+- `Person` has a **destructor** that does `delete[] _name;`.
+- `Person` does **NOT** implement a copy constructor.
+  - Therefore, the compiler provides a default one (shallow copy).
+
+In this step, we intentionally copy-construct a `Person`:
+
+```cpp
+Person a("Bindi", 25, 1001);
+Person b = a;  // Copy construction -> shallow copy of _name (DISASTER)
+```
+
+#### Code
+`include/person.h`
+```c++
+#pragma once
+
+class Person {
+private:
+    char* _name;
+    int _age;
+    int _id;
+
+public:
+    Person(const char* name, int age, int id);
+    ~Person();
+
+    // Intentionally missing copy constructor in this tag:
+    // Person(const Person& other);
+
+    void SetName(const char* name);
+
+    const char* GetName() const;
+    int GetAge() const;
+    int GetId() const;
+};
+```
+
+`src/person.h`
+```c++
+#include "person.h"
+
+#include <cstddef>
+#include <cstring>
+
+Person::Person(const char* name, int age, int id)
+    : _name(nullptr), _age(age), _id(id)
+{
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+Person::~Person()
+{
+    delete[] _name;
+    _name = nullptr;
+}
+
+void Person::SetName(const char* name)
+{
+    delete[] _name;
+    _name = nullptr;
+
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+const char* Person::GetName() const
+{
+    return _name;
+}
+
+int Person::GetAge() const
+{
+    return _age;
+}
+
+int Person::GetId() const
+{
+    return _id;
+}
+```
+
+`src/main.cpp`
+```c++
+#include "person.h"
+#include <iostream>
+
+void PrintPersonA(const Person& p)
+{
+    std::cout << "Name: " << p.GetName()
+              << ", Age: " << p.GetAge()
+              << ", ID: " << p.GetId()
+              << " name_ptr=" << static_cast<const void*>(p.GetName()) << "\n";
+}
+void PrintPersonB(const Person p)
+{
+    std::cout << "Name: " << p.GetName()
+              << ", Age: " << p.GetAge()
+              << ", ID: " << p.GetId()
+              << " name_ptr=" << static_cast<const void*>(p.GetName()) << "\n";
+}
+int main()
+{
+    Person a("Bindi", 25, 1001);
+
+    // Copy constructor call (compiler-generated):
+    Person b = a;
+
+    std::cout << "a: " << a.GetName()
+              << " age=" << a.GetAge()
+              << " id=" << a.GetId()
+              << " name_ptr=" << static_cast<const void*>(a.GetName()) << "\n";
+
+    std::cout << "b: " << b.GetName()
+              << " age=" << b.GetAge()
+              << " id=" << b.GetId()
+              << " name_ptr=" << static_cast<const void*>(b.GetName()) << "\n";
+
+
+    Person c("Ahmose", 30, 1003);
+    std::cout << "c: " << c.GetName()
+              << " age=" << c.GetAge()
+              << " id=" << c.GetId()
+              << " name_ptr=" << static_cast<const void*>(c.GetName()) << "\n";
+
+    PrintPersonA(c); // Pass by reference: no copy constructor call.
+    PrintPersonB(c); // Pass by value: copy constructor call -> shallow copy -> same name_ptr address.
+
+    // Notice: a and b will print the SAME pointer address for name_ptr.
+    // End of scope: ~Person runs for both -> double free.
+    return 0;
+}
+```
+#### Expected Results
+- make run
+  - Program may crash at the end of `main` (undefined behavior).
+  - Output should show:
+
+    - `a` and `b` have the **same `name_ptr` address** (evidence of shallow copy).
+    - `c` has a different `name_ptr` from `a` and `b`.
+    - `PrintPersonA(c)` (pass by reference) does **not** create a copy.
+      - The printed `name_ptr` will match `c` exactly.
+    - `PrintPersonB(c)` (pass by value) **does create a copy**.
+      - The printed `name_ptr` inside `PrintPersonB` will be the **same address as `c`**, proving that the compiler-generated copy constructor performed a shallow copy.
+
+  - At scope exit:
+    - Destructors run for `a`, `b`, and `c`.
+    - The shallow copies cause multiple objects to attempt to `delete[]` the same `_name`.
+    - This results in a **double-free** (or multiple double-frees).
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run
+mkdir -p build
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/person.cpp -o build/person.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+./app
+a: Bindi age=25 id=1001 name_ptr=0xaaaaf61e02b0
+b: Bindi age=25 id=1001 name_ptr=0xaaaaf61e02b0
+c: Ahmose age=30 id=1003 name_ptr=0xaaaaf61e06e0
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0xaaaaf61e06e0
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0xaaaaf61e06e0
+free(): double free detected in tcache 2
+make: *** [makefile:40: run] Aborted
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+---
+
+- make run-asan
+  - ASan should reliably report:
+
+    - `ERROR: AddressSanitizer: attempting double-free`
+
+  - The stack trace should point to:
+
+    - `Person::~Person()` (where `delete[] _name` is executed)
+    - `main` (scope exit for `a`, `b`, and `c`)
+    - Potentially also `PrintPersonB` (because passing by value triggered an additional shallow copy)
+
+  - The allocation trace should point back to:
+
+    - `Person::Person(const char*, int, int)` (where `_name` was allocated)
+
+This clearly demonstrates:
+- Copy construction is occurring in two places:
+  - `Person b = a;`
+  - `PrintPersonB(c);`
+- The compiler-generated copy constructor is performing a shallow copy.
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run-asan
+clang++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -fsanitize=address,undefined -fno-omit-frame-pointer src/main.cpp src/person.cpp -o app_asan 
+ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer) \
+ASAN_OPTIONS=symbolize=1 \
+./app_asan
+a: Bindi age=25 id=1001 name_ptr=0x502000000010
+b: Bindi age=25 id=1001 name_ptr=0x502000000010
+c: Ahmose age=30 id=1003 name_ptr=0x502000000030
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0x502000000030
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0x502000000030
+=================================================================
+==31722==ERROR: AddressSanitizer: attempting double-free on 0x502000000030 in thread T0:
+    #0 0xaaaae85d2ac4 in operator delete[](void*) (/workspaces/rule-of-five/app_asan+0x112ac4) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+    #1 0xaaaae85d610c in Person::~Person() /workspaces/rule-of-five/src/person.cpp:22:5
+    #2 0xaaaae85d5ab4 in main /workspaces/rule-of-five/src/main.cpp:48:1
+    #3 0xffff949384c0 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #4 0xffff94938594 in __libc_start_main csu/../csu/libc-start.c:360:3
+    #5 0xaaaae84f5c2c in _start (/workspaces/rule-of-five/app_asan+0x35c2c) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+
+0x502000000030 is located 0 bytes inside of 7-byte region [0x502000000030,0x502000000037)
+freed by thread T0 here:
+    #0 0xaaaae85d2ac4 in operator delete[](void*) (/workspaces/rule-of-five/app_asan+0x112ac4) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+    #1 0xaaaae85d610c in Person::~Person() /workspaces/rule-of-five/src/person.cpp:22:5
+    #2 0xaaaae85d5aa8 in main /workspaces/rule-of-five/src/main.cpp:43:5
+    #3 0xffff949384c0 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #4 0xffff94938594 in __libc_start_main csu/../csu/libc-start.c:360:3
+    #5 0xaaaae84f5c2c in _start (/workspaces/rule-of-five/app_asan+0x35c2c) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+
+previously allocated by thread T0 here:
+    #0 0xaaaae85d2228 in operator new[](unsigned long) (/workspaces/rule-of-five/app_asan+0x112228) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+    #1 0xaaaae85d5fac in Person::Person(char const*, int, int) /workspaces/rule-of-five/src/person.cpp:16:13
+    #2 0xaaaae85d5658 in main /workspaces/rule-of-five/src/main.cpp:36:12
+    #3 0xffff949384c0 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #4 0xffff94938594 in __libc_start_main csu/../csu/libc-start.c:360:3
+    #5 0xaaaae84f5c2c in _start (/workspaces/rule-of-five/app_asan+0x35c2c) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7)
+
+SUMMARY: AddressSanitizer: double-free (/workspaces/rule-of-five/app_asan+0x112ac4) (BuildId: c4d8df763a9f2d93d8a052853b943516bf9689c7) in operator delete[](void*)
+==31722==ABORTING
+make: *** [makefile:47: run-asan] Error 1
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+
+
+---
+
+- Run with Valgrind
+  - Valgrind should report:
+
+    - An **invalid free** or **double free** near program exit.
+
+  - The error will trace back to:
+
+    - `Person::~Person()`
+
+  - Valgrind may also indicate that the same memory block was freed multiple times.
+
+This confirms that:
+- The shallow copy of `_name` leads to multiple `delete[]` calls on the same heap allocation.
+- The compiler-generated copy constructor is unsafe for classes that own dynamic memory.
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ valgrind --leak-check=full ./app 
+==32029== Memcheck, a memory error detector
+==32029== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==32029== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==32029== Command: ./app
+==32029== 
+a: Bindi age=25 id=1001 name_ptr=0x4e03080
+b: Bindi age=25 id=1001 name_ptr=0x4e03080
+c: Ahmose age=30 id=1003 name_ptr=0x4e03510
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0x4e03510
+Name: Ahmose, Age: 30, ID: 1003 name_ptr=0x4e03510
+==32029== Invalid free() / delete / delete[] / realloc()
+==32029==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x109233: Person::~Person() (person.cpp:22)
+==32029==    by 0x1090BB: main (main.cpp:48)
+==32029==  Address 0x4e03510 is 0 bytes inside a block of size 7 free'd
+==32029==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x109233: Person::~Person() (person.cpp:22)
+==32029==    by 0x1090AF: main (main.cpp:43)
+==32029==  Block was alloc'd at
+==32029==    at 0x4886FFC: operator new[](unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x1091E7: Person::Person(char const*, int, int) (person.cpp:16)
+==32029==    by 0x108FCB: main (main.cpp:36)
+==32029== 
+==32029== Invalid free() / delete / delete[] / realloc()
+==32029==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x109233: Person::~Person() (person.cpp:22)
+==32029==    by 0x1090CB: main (main.cpp:48)
+==32029==  Address 0x4e03080 is 0 bytes inside a block of size 6 free'd
+==32029==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x109233: Person::~Person() (person.cpp:22)
+==32029==    by 0x1090C3: main (main.cpp:48)
+==32029==  Block was alloc'd at
+==32029==    at 0x4886FFC: operator new[](unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==32029==    by 0x1091E7: Person::Person(char const*, int, int) (person.cpp:16)
+==32029==    by 0x108E1F: main (main.cpp:20)
+==32029== 
+==32029== 
+==32029== HEAP SUMMARY:
+==32029==     in use at exit: 0 bytes in 0 blocks
+==32029==   total heap usage: 4 allocs, 6 frees, 74,765 bytes allocated
+==32029== 
+==32029== All heap blocks were freed -- no leaks are possible
+==32029== 
+==32029== For lists of detected and suppressed errors, rerun with: -s
+==32029== ERROR SUMMARY: 2 errors from 2 contexts (suppressed: 0 from 0)
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
 :pushpin: `TAG step-01-03-copy-assign`
 
 ### Move Constructor
