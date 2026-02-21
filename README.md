@@ -913,10 +913,261 @@ vscode ➜ /workspaces/rule-of-five (main) $
 
 ### Move Constructor
 
+
 #### Goal
+
+Implement the **Move Constructor** to enable efficient transfer of ownership of `_name` **without copying**.
+
+This step teaches:
+
+- Copying allocates new memory and copies characters (safe but potentially expensive).
+- Moving **steals the pointer** and avoids allocation/copy.
+- After a move, the source object must be left in a **safe, destructible state** (typically `_name == nullptr`).
+
+> Key idea: **Move = transfer ownership**, not duplicate ownership.
+
+---
+
 #### State of Code
+
+At the start of this tag, `Person` already has:
+
+- `Person(const char* name, int age, int id)` (allocates `_name`)
+- `~Person()` (frees `_name`)
+- `Person(const Person& other)` (deep copy)
+- `Person& operator=(const Person& other)` (deep copy assignment)
+
+What is **missing** (and will be added in this phase):
+
+- `Person(Person&& other) noexcept` (move constructor)
+
+After this tag:
+
+- Returning a `Person` from a function and constructing a new `Person` from it can use move semantics.
+- You can intentionally force a move using `std::move`.
+
+---
+
 #### Code
+
+##### `include/person.h`
+
+```cpp
+#pragma once
+
+class Person {
+private:
+    char* _name;
+    int _age;
+    int _id;
+
+public:
+    Person(const char* name, int age, int id);
+
+    // Rule of 3
+    ~Person();
+    Person(const Person& other);
+    Person& operator=(const Person& other);
+
+    // NEW: Move Constructor (Rule of 5 begins)
+    Person(Person&& other) noexcept;
+
+    void SetName(const char* name);
+
+    const char* GetName() const;
+    int GetAge() const;
+    int GetId() const;
+};
+```
+
+`src/person.cpp`
+```cpp
+#include "person.h"
+
+#include <cstddef>
+#include <cstring>
+#include <utility> // std::move (optional)
+
+Person::Person(const char* name, int age, int id)
+    : _name(nullptr), _age(age), _id(id)
+{
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+Person::~Person()
+{
+    delete[] _name;
+    _name = nullptr;
+}
+
+Person::Person(const Person& other)
+    : _name(nullptr), _age(other._age), _id(other._id)
+{
+    if (!other._name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(other._name);
+    _name = new char[len + 1];
+    std::strcpy(_name, other._name);
+}
+
+Person& Person::operator=(const Person& other)
+{
+    if (this == &other) {
+        return *this;
+    }
+
+    delete[] _name;
+    _name = nullptr;
+
+    _age = other._age;
+    _id  = other._id;
+
+    if (!other._name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return *this;
+    }
+
+    std::size_t len = std::strlen(other._name);
+    _name = new char[len + 1];
+    std::strcpy(_name, other._name);
+
+    return *this;
+}
+
+// NEW: Move Constructor
+Person::Person(Person&& other) noexcept
+    : _name(other._name), _age(other._age), _id(other._id)
+{
+    // Leave other in a safe state
+    other._name = nullptr;
+    other._age = 0;
+    other._id = 0;
+}
+
+void Person::SetName(const char* name)
+{
+    delete[] _name;
+    _name = nullptr;
+
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+const char* Person::GetName() const { return _name; }
+int Person::GetAge() const { return _age; }
+int Person::GetId() const { return _id; }
+```
+
 #### Expected Results
+
+- `make run`
+
+  - Program runs normally.
+  - After `Person c = std::move(b);`:
+    - `c.name_ptr` should be the **same pointer value that `b` had before the move** (ownership transferred).
+    - `b` should be in a safe state:
+      - `b.GetName()` may be `nullptr` (printed as `(null)` in the sample code).
+    - No crash should occur when `b` is destroyed.
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run
+mkdir -p build
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/person.cpp -o build/person.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+./app
+a: Name=TempName Age=99 ID=999 name_ptr=0xaaaaf1d5b2b0
+b (before move): Name=Bindi Age=25 ID=1001 name_ptr=0xaaaaf1d5b6e0
+c (moved-from b): Name=Bindi Age=25 ID=1001 name_ptr=0xaaaaf1d5b6e0
+b (after move): Name=(null) Age=0 ID=0 name_ptr=0
+```
+
+---
+
+- `make run-asan`
+
+  - ASan should report **no double-free**, **no use-after-free**, and no invalid frees.
+  - If the move constructor is wrong (for example, if you forget to null out `other._name`), ASan will typically report:
+    - `ERROR: AddressSanitizer: attempting double-free`
+    - pointing to `Person::~Person()`.
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run-asan
+clang++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -fsanitize=address,undefined -fno-omit-frame-pointer src/main.cpp src/person.cpp -o app_asan 
+ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer) \
+ASAN_OPTIONS=symbolize=1 \
+./app_asan
+a: Name=TempName Age=99 ID=999 name_ptr=0x502000000010
+b (before move): Name=Bindi Age=25 ID=1001 name_ptr=0x502000000030
+c (moved-from b): Name=Bindi Age=25 ID=1001 name_ptr=0x502000000030
+b (after move): Name=(null) Age=0 ID=0 name_ptr=0
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+
+
+---
+
+- `make valgrind`
+
+  - Valgrind should report:
+    - `ERROR SUMMARY: 0 errors from 0 contexts`
+    - and no leaks at exit.
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make valgrind
+mkdir -p build
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/person.cpp -o build/person.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./app
+==42745== Memcheck, a memory error detector
+==42745== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==42745== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==42745== Command: ./app
+==42745== 
+a: Name=TempName Age=99 ID=999 name_ptr=0x4e03080
+b (before move): Name=Bindi Age=25 ID=1001 name_ptr=0x4e03510
+c (moved-from b): Name=Bindi Age=25 ID=1001 name_ptr=0x4e03510
+b (after move): Name=(null) Age=0 ID=0 name_ptr=0
+==42745== 
+==42745== HEAP SUMMARY:
+==42745==     in use at exit: 0 bytes in 0 blocks
+==42745==   total heap usage: 4 allocs, 4 frees, 74,767 bytes allocated
+==42745== 
+==42745== All heap blocks were freed -- no leaks are possible
+==42745== 
+==42745== For lists of detected and suppressed errors, rerun with: -s
+==42745== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+```
+
+
+---
+
+This confirms:
+
+- The move constructor successfully transfers ownership of `_name`.
+- The moved-from object is left in a safe state.
+- Destructors execute without freeing the same pointer twice.
 
 :pushpin: `TAG step-01-04-move-ctor`
 
