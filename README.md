@@ -325,11 +325,254 @@ make: *** [makefile:47: run-asan] Error 1
 ### Copy Constructor
 
 #### Goal
+
+Fix the **shallow-copy bug** by implementing a proper **copy constructor** that performs a **deep copy** of `_name`.
+
+This step teaches:
+
+- The compiler-generated copy constructor performs a **memberwise copy**
+- For raw pointers, that means two objects end up pointing to the **same heap memory**
+- If a destructor deletes that memory, both objects will attempt to free the same pointer → **double free**
+- The fix is to allocate new memory and copy the data
+
+> Key idea: Each `Person` must **own its own copy** of `_name`.
+
+---
+
 #### State of Code
+
+- `Person` dynamically allocates `_name` using `new[]`
+- Destructor exists and deletes `_name`
+- Copy constructor is now explicitly implemented
+- Copy assignment operator is **not implemented yet**
+- Move operations are not implemented yet
+
+After this step:
+
+- `Person b = a;` performs a **deep copy**
+- `a._name` and `b._name` point to **different** heap allocations
+- No double-free occurs at scope exit
+
+---
+
 #### Code
+
+`include/person.h`
+
+```cpp
+#pragma once
+
+class Person {
+private:
+    char* _name;
+    int _age;
+    int _id;
+
+public:
+    Person(const char* name, int age, int id);
+    ~Person();
+
+    // Copy Constructor (deep copy)
+    Person(const Person& other);
+
+    void SetName(const char* name);
+
+    const char* GetName() const;
+    int GetAge() const;
+    int GetId() const;
+};
+
+`src/person.cpp`
+```c++
+#include "person.h"
+
+#include <cstddef>
+#include <cstring>
+
+Person::Person(const char* name, int age, int id)
+    : _name(nullptr), _age(age), _id(id)
+{
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+Person::~Person()
+{
+    delete[] _name;
+    _name = nullptr;
+}
+
+// Copy Constructor (deep copy)
+Person::Person(const Person& other)
+    : _name(nullptr), _age(other._age), _id(other._id)
+{
+    if (!other._name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(other._name);
+    _name = new char[len + 1];
+    std::strcpy(_name, other._name);
+}
+
+void Person::SetName(const char* name)
+{
+    delete[] _name;
+    _name = nullptr;
+
+    if (!name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(name);
+    _name = new char[len + 1];
+    std::strcpy(_name, name);
+}
+
+const char* Person::GetName() const
+{
+    return _name;
+}
+
+int Person::GetAge() const
+{
+    return _age;
+}
+
+int Person::GetId() const
+{
+    return _id;
+}
+```
+
+`scr/main.cpp`
+```c++
+#include "person.h"
+#include <iostream>
+
+int main()
+{
+    Person a("Piotr", 25, 1001);
+
+    // Copy construction
+    Person b("Sasha", 30, 1002);
+
+    b = a; // Assignment operator (not defined, will use default shallow copy)
+
+    std::cout << "a: " << a.GetName()
+              << "Address of a[0]: " << static_cast<const void*>(a.GetName())
+              << " age=" << a.GetAge()
+              << " id=" << a.GetId() << "\n";
+
+    std::cout << "b: " << b.GetName()
+              << "Address of b[0]: " << static_cast<const void*>(b.GetName())
+              << " age=" << b.GetAge()
+              << " id=" << b.GetId() << "\n";
+
+    return 0;
+}
+```
+
 #### Expected Results
 
-:pushpin: `TAG step-01-02-copy-ctor`
+make run
+* Program runs normally.
+* Both a and b print identical values.
+* No crash at scope exit.
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+./app
+a: PiotrAddress of a[0]: 0xaaab26b992b0 age=25 id=1001
+b: PiotrAddress of b[0]: 0xaaab26b992d0 age=25 id=1001
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+make run-asan
+* No double-free reported.
+* ASan should be clean for this scenario.
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run asan
+./app
+a: PiotrAddress of a[0]: 0xaaaaf76222b0 age=25 id=1001
+b: PiotrAddress of b[0]: 0xaaaaf76222d0 age=25 id=1001
+clang++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -fsanitize=address,undefined -fno-omit-frame-pointer src/main.cpp src/person.cpp -o app_asan 
+vscode ➜ /workspaces/rule-of-five (main) $ ./app_asan 
+a: PiotrAddress of a[0]: 0x502000000010 age=25 id=1001
+b: PiotrAddress of b[0]: 0x502000000030 age=25 id=1001
+```
+
+make valgrind
+* No “definitely lost” memory (assuming destructor correctly frees memory).
+* If leaks appear, Valgrind will point to the relevant allocation site.
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make valgrind
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+src/main.cpp: In function ‘int main()’:
+src/main.cpp:11:9: warning: implicitly-declared ‘constexpr Person& Person::operator=(const Person&)’ is deprecated [-Wdeprecated-copy]
+   11 |     b = a; // Assignment operator (not defined, will use default shallow copy)
+      |         ^
+In file included from src/main.cpp:1:
+include/person.h:11:5: note: because ‘Person’ has user-provided ‘Person::Person(const Person&)’
+   11 |     Person(const Person& other); // Here
+      |     ^~~~~~
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./app
+==26867== Memcheck, a memory error detector
+==26867== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==26867== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==26867== Command: ./app
+==26867== 
+a: PiotrAddress of a[0]: 0x4e03080 age=25 id=1001
+b: PiotrAddress of b[0]: 0x4e03080 age=25 id=1001
+==26867== Invalid free() / delete / delete[] / realloc()
+==26867==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==26867==    by 0x108F6B: Person::~Person() (person.cpp:22)
+==26867==    by 0x108E1B: main (main.cpp:24)
+==26867==  Address 0x4e03080 is 0 bytes inside a block of size 6 free'd
+==26867==    at 0x488A834: operator delete[](void*) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==26867==    by 0x108F6B: Person::~Person() (person.cpp:22)
+==26867==    by 0x108E13: main (main.cpp:24)
+==26867==  Block was alloc'd at
+==26867==    at 0x4886FFC: operator new[](unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==26867==    by 0x108F1F: Person::Person(char const*, int, int) (person.cpp:16)
+==26867==    by 0x108C57: main (main.cpp:6)
+==26867== 
+==26867== 
+==26867== HEAP SUMMARY:
+==26867==     in use at exit: 6 bytes in 1 blocks
+==26867==   total heap usage: 4 allocs, 4 frees, 74,764 bytes allocated
+==26867== 
+==26867== 6 bytes in 1 blocks are definitely lost in loss record 1 of 1
+==26867==    at 0x4886FFC: operator new[](unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-arm64-linux.so)
+==26867==    by 0x108F1F: Person::Person(char const*, int, int) (person.cpp:16)
+==26867==    by 0x108C73: main (main.cpp:9)
+==26867== 
+==26867== LEAK SUMMARY:
+==26867==    definitely lost: 6 bytes in 1 blocks
+==26867==    indirectly lost: 0 bytes in 0 blocks
+==26867==      possibly lost: 0 bytes in 0 blocks
+==26867==    still reachable: 0 bytes in 0 blocks
+==26867==         suppressed: 0 bytes in 0 blocks
+==26867== 
+==26867== For lists of detected and suppressed errors, rerun with: -s
+==26867== ERROR SUMMARY: 2 errors from 2 contexts (suppressed: 0 from 0)
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+
+
+:pushpin: `TAG step-01-02-copy-assg-op`
 
 ### Copy Assignment Operator
 

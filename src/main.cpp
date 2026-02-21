@@ -1,15 +1,24 @@
 #include "person.h"
-
 #include <iostream>
 
 int main()
 {
-    Person p("Ahmed", 25, 1001);
-    std::cout << p.GetName() << " age=" << p.GetAge() << " id=" << p.GetId() << "\n";
+    Person a("Piotr", 25, 1001);
 
-    // Make the leak obvious: allocate a new name without freeing the old one.
-    p.SetName("Ahmed Mustafa");
-    std::cout << p.GetName() << " age=" << p.GetAge() << " id=" << p.GetId() << "\n";
+    // Copy construction
+    Person b("Sasha", 30, 1002);
+
+    b = a; // Assignment operator (not defined, will use default shallow copy)
+
+    std::cout << "a: " << a.GetName()
+              << "Address of a[0]: " << static_cast<const void*>(a.GetName())
+              << " age=" << a.GetAge()
+              << " id=" << a.GetId() << "\n";
+
+    std::cout << "b: " << b.GetName()
+              << "Address of b[0]: " << static_cast<const void*>(b.GetName())
+              << " age=" << b.GetAge()
+              << " id=" << b.GetId() << "\n";
 
     return 0;
 }

@@ -1,13 +1,12 @@
 #include "person.h"
 
-#include <cstddef>   // size_t
-#include <cstring>   // std::strlen, std::strcpy
+#include <cstddef>
+#include <cstring>
 
 Person::Person(const char* name, int age, int id)
     : _name(nullptr), _age(age), _id(id)
 {
     if (!name) {
-        // Allocate an empty string if name is null
         _name = new char[1];
         _name[0] = '\0';
         return;
@@ -18,10 +17,32 @@ Person::Person(const char* name, int age, int id)
     std::strcpy(_name, name);
 }
 
+Person::~Person()
+{
+    delete[] _name;
+    _name = nullptr;
+}
+
+// Copy Constructor (deep copy)
+Person::Person(const Person& other)
+    : _name(nullptr), _age(other._age), _id(other._id)
+{
+    if (!other._name) {
+        _name = new char[1];
+        _name[0] = '\0';
+        return;
+    }
+
+    std::size_t len = std::strlen(other._name);
+    _name = new char[len + 1];
+    std::strcpy(_name, other._name);
+}
+
 void Person::SetName(const char* name)
 {
-    // Intentionally leaks in this step (no destructor / no delete yet).
-    // We will fix ownership and cleanup in the next steps.
+    delete[] _name;
+    _name = nullptr;
+
     if (!name) {
         _name = new char[1];
         _name[0] = '\0';
