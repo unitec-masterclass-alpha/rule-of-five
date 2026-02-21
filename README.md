@@ -1336,6 +1336,19 @@ int main()
     - `b.GetName()` should be `nullptr` (printed as `(null)`).
   - No crash should occur when either object is destroyed.
 
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run
+mkdir -p build
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/main.cpp -o build/main.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -c src/person.cpp -o build/person.o
+g++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude build/main.o build/person.o -o app 
+./app
+Before move-assign, a: Name=Alice Age=30 ID=1 name_ptr=0xaaaacef822b0
+Before move-assign, b: Name=Bob Age=40 ID=2 name_ptr=0xaaaacef822d0
+After move-assign, a: Name=Bob Age=40 ID=2 name_ptr=0xaaaacef822d0
+After move-assign, b: Name=(null) Age=0 ID=0 name_ptr=0
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
 ---
 
 - `make run-asan`
@@ -1348,6 +1361,19 @@ int main()
     - `ERROR: AddressSanitizer: attempting double-free`
     - pointing to `Person::~Person()`.
 
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make run-asan
+clang++ -std=c++20 -g -O0 -Wall -Wextra -pedantic -Iinclude -fsanitize=address,undefined -fno-omit-frame-pointer src/main.cpp src/person.cpp -o app_asan 
+ASAN_SYMBOLIZER_PATH=$(command -v llvm-symbolizer) \
+ASAN_OPTIONS=symbolize=1 \
+./app_asan
+Before move-assign, a: Name=Alice Age=30 ID=1 name_ptr=0x502000000010
+Before move-assign, b: Name=Bob Age=40 ID=2 name_ptr=0x502000000030
+After move-assign, a: Name=Bob Age=40 ID=2 name_ptr=0x502000000030
+After move-assign, b: Name=(null) Age=0 ID=0 name_ptr=0
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
+
 ---
 
 - `make valgrind`
@@ -1356,6 +1382,30 @@ int main()
     - `ERROR SUMMARY: 0 errors from 0 contexts`
     - No memory leaks
     - No invalid frees
+
+```bash
+vscode ➜ /workspaces/rule-of-five (main) $ make valgrind
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./app
+==69296== Memcheck, a memory error detector
+==69296== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==69296== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==69296== Command: ./app
+==69296== 
+Before move-assign, a: Name=Alice Age=30 ID=1 name_ptr=0x4e03080
+Before move-assign, b: Name=Bob Age=40 ID=2 name_ptr=0x4e030d0
+After move-assign, a: Name=Bob Age=40 ID=2 name_ptr=0x4e030d0
+After move-assign, b: Name=(null) Age=0 ID=0 name_ptr=0
+==69296== 
+==69296== HEAP SUMMARY:
+==69296==     in use at exit: 0 bytes in 0 blocks
+==69296==   total heap usage: 4 allocs, 4 frees, 74,762 bytes allocated
+==69296== 
+==69296== All heap blocks were freed -- no leaks are possible
+==69296== 
+==69296== For lists of detected and suppressed errors, rerun with: -s
+==69296== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+vscode ➜ /workspaces/rule-of-five (main) $ 
+```
 
 ---
 
