@@ -1429,3 +1429,211 @@ This confirms:
 
 :pushpin: `step-01-06-rule-of-5-done`
 
+## Next Steps
+1. Professional polish (use Person)
+2. Modern C++ Contrast
+3. Industry relevance bridge
+4. Full Cycle: Industry-Grade Architecture Example
+
+
+1. Step-02 — Professional Polish
+   1. =delete
+   2. =default
+   3. forbid copying
+   4. design intent
+2. Step-03 — Modern C++ Contrast
+   1. replace char* with std::string
+   2. delete all special members
+   3. Rule of 0
+3. Step-04 — Industry Relevance Bridge
+   1. RAII
+   2. ownership thinking
+   3. GC vs deterministic destruction
+   4. mapping to webdev concepts
+
+# Step-05 — Full Cycle: Industry-Grade Architecture Example  
+## Capstone with `Point` and `Polygon`
+
+### Purpose
+
+This final step demonstrates what **professional C++ architecture** looks like after understanding:
+
+- Rule of 5
+- Rule of 0
+- RAII
+- Ownership semantics
+- Compiler control (`=delete`, `=default`)
+- Modern C++ abstractions
+
+This is not about crashing and fixing.
+This is about **designing correctly from the start**.
+
+---
+
+# Phase 1 — Raw Dynamic Memory Version (Controlled Complexity)
+
+We begin with a deliberately manual design:
+
+```cpp
+class Point {
+private:
+    double _x;
+    double _y;
+
+public:
+    Point(double x, double y);
+    double X() const;
+    double Y() const;
+};
+```
+
+```cpp
+class Polygon {
+private:
+    Point* _points;
+    std::size_t _size;
+
+public:
+    Polygon(std::size_t size);
+    ~Polygon();
+
+    Polygon(const Polygon& other);
+    Polygon& operator=(const Polygon& other);
+
+    Polygon(Polygon&& other) noexcept;
+    Polygon& operator=(Polygon&& other) noexcept;
+
+    std::size_t Size() const;
+    const Point& At(std::size_t index) const;
+};
+```
+
+---
+
+## Goals of Phase 1
+
+- Apply Rule of 5 in a realistic structure.
+- Manage a dynamic array of objects.
+- Enforce invariants (`_points != nullptr` when `_size > 0`).
+- Ensure deep copy correctness.
+- Ensure move efficiency.
+- Validate with ASan and Valgrind.
+- Separate interface (`.h`) and implementation (`.cpp`).
+- Use const-correctness and `noexcept` properly.
+
+Students see:
+
+- This is real ownership.
+- Copying a polygon is expensive.
+- Move semantics matter in real code.
+
+---
+
+# Phase 2 — Modern C++ Rewrite (Rule of 0)
+
+Replace:
+
+```cpp
+Point* _points;
+std::size_t _size;
+```
+
+With:
+
+```cpp
+std::vector<Point> _points;
+```
+
+Delete:
+
+- Destructor
+- Copy constructor
+- Copy assignment
+- Move constructor
+- Move assignment
+
+Result:
+
+```cpp
+class Polygon {
+private:
+    std::vector<Point> _points;
+
+public:
+    Polygon(std::vector<Point> points);
+    std::size_t Size() const;
+    const Point& At(std::size_t index) const;
+};
+```
+
+---
+
+## Goals of Phase 2
+
+- Demonstrate Rule of 0 in a non-trivial structure.
+- Show how the STL eliminates memory complexity.
+- Compare implementation size and risk.
+- Show how architecture improves maintainability.
+
+---
+
+# Architectural Teaching Points
+
+### 1. Ownership
+- `Polygon` owns its points.
+- Raw pointers require explicit ownership logic.
+- `std::vector` expresses ownership automatically.
+
+### 2. RAII
+- Construction acquires resources.
+- Destruction releases resources.
+- Deterministic cleanup.
+
+### 3. Performance Awareness
+- Copying vs moving large structures.
+- Why move semantics matter in containers.
+
+### 4. Interface Design
+- Hide implementation details.
+- Provide safe accessors.
+- Enforce invariants.
+
+### 5. Industry Standards
+- Separate headers and source files.
+- Use `noexcept` where appropriate.
+- Avoid unnecessary copying.
+- Prefer STL over raw memory.
+
+---
+
+# Full Capstone Narrative
+
+1. Build a raw dynamic-memory `Polygon`.
+2. Validate correctness with tools.
+3. Show complexity and risk.
+4. Refactor to `std::vector`.
+5. Delete special member functions.
+6. Arrive at Rule of 0.
+7. Compare code size and cognitive load.
+
+---
+
+# Final Message to Students
+
+We learned how to:
+- Manually manage memory.
+- Control the compiler.
+- Design copy/move semantics.
+
+But in professional code:
+
+> You avoid complexity when possible.
+
+The mastery of manual memory management allows you to:
+- Recognize ownership patterns.
+- Understand performance implications.
+- Write safer abstractions.
+- Trust modern C++ tools correctly.
+
+This completes the full cycle from:
+Manual memory → Rule of 5 → Rule of 0 → Industry architecture.
